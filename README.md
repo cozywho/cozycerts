@@ -3,7 +3,7 @@ OpenSSL wrapped in streamlit so dummies like me can use it lazily.
 A self contained CA intended to work across linux environments.
 
 git pull in whatever directory you want cozycerts.
-/opt/cozycerts, /home/$user/cozycerts, /etc/cozycerts, wherever you want.
+/opt/cozycerts, /home/$user/cozycerts, /etc/cozycerts, wherever.
 
 Root CA tab:
 - On first startup, create your Root CA.
