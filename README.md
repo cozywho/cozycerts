@@ -9,7 +9,7 @@ git pull in whatever directory you want cozycerts.
 cd cozycerts
 python3 -m venv venv
 pip install -r requirements.txt
-streamlit run main.py
+streamlit run main.py --server.address 0.0.0.0 --server.port 8501
 ```
 
 Root CA tab:
