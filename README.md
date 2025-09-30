@@ -1,9 +1,9 @@
 # cozycerts
-OpenSSL wrapped in streamlit so dummies like me can use it lazily.
-A self contained CA intended to work across linux environments.
+OpenSSL wrapped in streamlit so dummies like me can use it lazily.  
+A self contained CA intended to work across linux environments.  
 
-git pull in whatever directory you want cozycerts.
-/opt/cozycerts, /home/$user/cozycerts, /etc/cozycerts, wherever.
+git pull in whatever directory you want cozycerts.  
+/opt/cozycerts, /home/$user/cozycerts, /etc/cozycerts, wherever.  
 
 ```bash
 cd cozycerts
