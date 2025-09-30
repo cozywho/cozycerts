@@ -1,5 +1,5 @@
 # cozycerts
-OpenSSL wrapped so dummies like me can use it lazily.
+OpenSSL wrapped in streamlit so dummies like me can use it lazily.
 A self contained CA intended to work across linux environments.
 
 git pull in whatever directory you want cozycerts.
