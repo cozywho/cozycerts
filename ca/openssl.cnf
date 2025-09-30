@@ -1,0 +1,54 @@
+[ ca ]
+default_ca = CA_default
+
+[ CA_default ]
+# Directory and file locations
+dir             = ./ca
+certs           = $dir/certs
+new_certs_dir   = $dir/newcerts
+database        = $dir/index.txt
+serial          = $dir/serial
+crlnumber       = $dir/crlnumber
+crl             = $dir/crl.pem
+
+# Root key and cert
+private_key     = $dir/rootCA.key
+certificate     = $dir/rootCA.crt
+
+# Default policy
+default_days    = 365
+default_md      = sha256
+preserve        = no
+policy          = policy_anything
+x509_extensions = v3_ca
+
+# Where new certs go
+RANDFILE        = $dir/.rand
+
+# Extensions
+[ v3_ca ]
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always,issuer
+basicConstraints = critical,CA:true
+keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+
+[ v3_req ]
+basicConstraints = CA:FALSE
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth, clientAuth
+subjectAltName = @alt_names
+
+[ alt_names ]
+# Placeholder; filled dynamically by CozyCerts
+# DNS.1 = example.com
+# IP.1 = 10.0.0.1
+
+# Policy section
+[ policy_anything ]
+countryName             = optional
+stateOrProvinceName     = optional
+localityName            = optional
+organizationName        = optional
+organizationalUnitName  = optional
+commonName              = supplied
+
