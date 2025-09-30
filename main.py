@@ -52,7 +52,7 @@ tabs = st.tabs(["Root CA", "Certificates", "Settings"])
 
 # --- Tab 1: Root CA ---
 with tabs[0]:
-    st.header("Root CA")
+    st.subheader("Root CA")
     if not CA_CERT.exists():
         st.error("No Root CA found. Please create one.")
         if st.button("Create Root CA"):
@@ -85,7 +85,7 @@ with tabs[0]:
             ```
             """)
 
-    st.header("Inventory")
+    st.subheader("Inventory")
     issued = [crt.stem for crt in CERTS_DIR.glob("*.crt")]
     if not issued:
         st.warning("No certificates have been issued yet.")
@@ -171,7 +171,7 @@ with tabs[0]:
         st.session_state.clear_ca_confirm = False
 
     if not st.session_state.clear_ca_confirm:
-        if st.button("⚠️ Clear CA"):
+        if st.button("RESET ALL"):
             st.session_state.clear_ca_confirm = True
             st.rerun()
     else:
@@ -184,14 +184,14 @@ with tabs[0]:
                 st.success("CA has been reset to factory settings. Create a new Root CA before issuing certs.")
                 st.rerun()
         with c2:
-            if st.button("✖️ Cancel"):
+            if st.button("Cancel"):
                 st.session_state.clear_ca_confirm = False
                 st.info("Cancelled.")
                 st.rerun()
 
 # --- Tab 2: Certificates ---
 with tabs[1]:
-    st.header("Upload CSR to Sign")
+    st.subheader("Upload CSR to Sign")
     uploaded_csr = st.file_uploader("Choose CSR file", type=["csr"])
     if uploaded_csr and CA_CERT.exists():
         out_name = st.text_input("Certificate name (no extension)", uploaded_csr.name.replace(".csr", ""))
@@ -204,10 +204,10 @@ with tabs[1]:
             st.success(f"Issued certificate: {cert_file.name}")
             st.download_button("⬇ Download Certificate", cert_file.read_bytes(), cert_file.name)
 
-    st.header("Generate New Certificate")
-    dns_name = st.text_input("DNS Name (e.g. home.cozy.lab)", "")
-    ip_addr = st.text_input("IP Address (e.g. 10.4.20.215)", "")
-    self_sign = st.toggle("Self-sign with Cozy Root CA", value=True)
+    st.subheader("Generate New Certificate")
+    dns_name = st.text_input("DNS Name (e.g. service.domain.lan)", "")
+    ip_addr = st.text_input("IP Address (e.g. 10.x.x.x)", "")
+    self_sign = st.toggle("Self-sign with Root CA", value=True)
 
     if st.button("Generate Cert/CSR") and dns_name:
         key_file, csr_file, cert_file = generate_cert(dns_name, ip_addr, self_sign)
