@@ -4,6 +4,10 @@ A self contained CA intended to work across linux environments.
 
 git pull in whatever directory you want cozycerts.
 /opt/cozycerts, /home/$user/cozycerts, /etc/cozycerts, wherever.
+cd cozycerts
+python3 -m venv venv
+pip install -r requirements.txt
+streamlit start main.py
 
 Root CA tab:
 - On first startup, create your Root CA.
