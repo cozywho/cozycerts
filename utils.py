@@ -97,17 +97,34 @@ def generate_cert(dns_name: str, ip_addr: str, self_sign: bool = True):
 
     subj = f"/C={metadata['country']}/ST={metadata['state']}/L={metadata['locality']}/O={metadata['org']}/OU={metadata['ou']}/CN={dns_name}"
 
-    subprocess.run(["openssl", "genrsa", "-out", str(key_file), "2048"], check=True)
-    subprocess.run(
-        ["openssl", "req", "-new", "-key", str(key_file), "-subj", subj, "-out", str(csr_file)],
-        check=True
-    )
+    san_entries = []
+    if dns_name:
+        san_entries.append(f"DNS:{dns_name}")
+    if ip_addr:
+        san_entries.append(f"IP:{ip_addr}")
+    san_str = ",".join(san_entries)
 
+    subprocess.run(["openssl", "genrsa", "-out", str(key_file), "2048"], check=True)
+
+    csr_cmd = [
+        "openssl", "req", "-new",
+        "-key", str(key_file),
+        "-subj", subj,
+        "-out", str(csr_file)
+    ]
+    if san_entries:
+        csr_cmd.extend(["-addext", f"subjectAltName={san_str}"])
+
+    subprocess.run(csr_cmd, check=True)
+
+    # If self-sign requested, sign with CozyCerts RootCA
     if self_sign:
         sign_csr(csr_file, dns_name, dns_name, ip_addr)
         return key_file, csr_file, cert_file
     else:
+        # Return only key + CSR; SANs are already in CSR
         return key_file, csr_file, None
+
 
 def get_cert_expiry(cert_file: Path):
     try:
