@@ -6,6 +6,7 @@ git pull in whatever directory you want cozycerts to live.
 /opt/cozycerts, /home/$user/cozycerts, /etc/cozycerts, wherever.  
 
 ```bash
+git clone https://github.com/cozywho/cozycerts.git
 cd cozycerts
 python3 -m venv venv
 source venv/bin/activate
