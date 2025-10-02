@@ -14,7 +14,8 @@ st.set_page_config(page_title="cozycerts", layout="wide")
 
 # ---------- helpers ----------
 def _reset_ca():
-    # wipe everything under ca/ except openssl.cnf
+    """Reset CA to factory state (delete all certs/keys, keep only openssl.cnf)."""
+    # Remove all files/dirs under ca/ except openssl.cnf
     for f in CA_DIR.glob("*"):
         if f.name == "openssl.cnf":
             continue
@@ -23,20 +24,20 @@ def _reset_ca():
         elif f.is_dir():
             shutil.rmtree(f)
 
-    # required OpenSSL bookkeeping
-    (CA_DIR / "index.txt").write_text("")           # DB
-    (CA_DIR / "serial").write_text("1000\n")        # first serial
-    (CA_DIR / "crlnumber").write_text("1000\n")     # first CRL number
+    # Reinitialize CA bookkeeping files
+    (CA_DIR / "index.txt").write_text("")           # database of issued certs
+    (CA_DIR / "serial").write_text("1000\n")        # serial counter
+    (CA_DIR / "crlnumber").write_text("1000\n")     # CRL counter
 
-    # ensure newcerts exists
+    # Ensure newcerts dir exists (required by OpenSSL CA)
     (CA_DIR / "newcerts").mkdir(parents=True, exist_ok=True)
 
-    # clear issued certs/keys/csrs
+    # Clear all issued certs/keys/CSRs
     if CERTS_DIR.exists():
         shutil.rmtree(CERTS_DIR)
     CERTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # remove old CRL if present
+    # Remove old CRL if exists
     crl_file = CA_DIR / "crl.pem"
     if crl_file.exists():
         crl_file.unlink()
@@ -44,22 +45,25 @@ def _reset_ca():
 # ---------- header ----------
 col1, col2 = st.columns([1, 4])
 with col1:
-    st.image("cprl.png", width=90)
+    st.image("cprl.png", width=90)   # logo
 with col2:
     st.title("cozycerts")
 
+# Three tabs in UI
 tabs = st.tabs(["Root CA", "Certificates", "Settings"])
 
 # --- Tab 1: Root CA ---
 with tabs[0]:
     st.subheader("Root CA")
     if not CA_CERT.exists():
+        # No Root CA present
         st.error("No Root CA found. Please create one.")
         if st.button("Create Root CA"):
             create_root_ca()
             st.success("Root CA created")
             st.rerun()
     else:
+        # Show Root CA expiry
         expiry = get_cert_expiry(CA_CERT)
         if expiry:
             days_left = (expiry - datetime.utcnow()).days
@@ -74,8 +78,10 @@ with tabs[0]:
         else:
             st.write("⚪ **rootCA** → Expiration unknown")
 
+        # Download root CA
         st.download_button("⬇ Download Trusted Root Certificate", CA_CERT.read_bytes(), "rootCA.crt")
 
+        # Install instructions
         with st.expander("Install Instructions"):
             st.markdown("""
             **Fedora / Rocky / RHEL**
@@ -85,17 +91,20 @@ with tabs[0]:
             ```
             """)
 
+    # Inventory of issued certs
     st.subheader("Inventory")
     issued = [crt.stem for crt in CERTS_DIR.glob("*.crt")]
     if not issued:
         st.warning("No certificates have been issued yet.")
     else:
         for name in issued:
+            # For each cert, show expiry + download/export/revoke options
             crt = CERTS_DIR / f"{name}.crt"
             key = CERTS_DIR / f"{name}.key"
             csr = CERTS_DIR / f"{name}.csr"
             expiry = get_cert_expiry(crt)
 
+            # Expiry + color indicator
             if expiry:
                 days_left = (expiry - datetime.utcnow()).days
                 expiry_str = expiry.strftime("%d%b%Y@%H:%M UTC")
@@ -110,10 +119,12 @@ with tabs[0]:
                 header_text = f"⚪ **{name}** → Expiration unknown"
 
             with st.expander(header_text, expanded=False):
+                # Checkboxes for download selection
                 dl_key = st.checkbox("Key", key=f"chk-key-{name}")
                 dl_csr = st.checkbox("CSR", key=f"chk-csr-{name}")
                 dl_crt = st.checkbox("Cert", key=f"chk-crt-{name}")
 
+                # Bundle download (zip)
                 if st.button("⬇ Download Selected", key=f"dl-selected-{name}"):
                     buf = BytesIO()
                     with zipfile.ZipFile(buf, "w") as z:
@@ -132,6 +143,7 @@ with tabs[0]:
                         key=f"bundle-{name}"
                     )
 
+                # Export to chosen format
                 fmt = st.selectbox(
                     f"Export format for {name}:",
                     ["pem", "der", "pkcs12", "jks", "bundle"],
@@ -152,6 +164,7 @@ with tabs[0]:
                     else:
                         st.error(msg)
 
+                # Revoke option
                 if st.button("❌ Revoke", key=f"revoke-{name}"):
                     ok, msg = revoke_cert(name)
                     if ok:
@@ -159,11 +172,12 @@ with tabs[0]:
                     else:
                         st.error(msg)
 
+    # CRL download if present
     crl_file = CA_DIR / "crl.pem"
     if crl_file.exists():
         st.download_button("⬇ Download CRL", crl_file.read_bytes(), "crl.pem")
 
-    # --- Danger Zone (two-step confirm with session state) ---
+    # Danger Zone: Reset CA
     st.divider()
     st.subheader("Danger Zone")
 
@@ -175,6 +189,7 @@ with tabs[0]:
             st.session_state.clear_ca_confirm = True
             st.rerun()
     else:
+        # Two-step confirm
         st.warning("Warning: Resetting to factory settings. This will delete ALL CA data and issued certs (keeps only openssl.cnf).")
         c1, c2 = st.columns(2)
         with c1:
@@ -198,6 +213,7 @@ with tabs[1]:
         dns_for_csr = st.text_input("DNS for CSR", "")
         ip_for_csr = st.text_input("IP for CSR", "")
         if st.button("Sign CSR") and dns_for_csr:
+            # Save uploaded CSR and sign it
             csr_path = CERTS_DIR / uploaded_csr.name
             csr_path.write_bytes(uploaded_csr.read())
             cert_file = sign_csr(csr_path, out_name, dns_for_csr, ip_for_csr)
@@ -210,12 +226,14 @@ with tabs[1]:
     self_sign = st.toggle("Self-sign with Root CA", value=True)
 
     if st.button("Generate Cert/CSR") and dns_name:
+        # Generate keypair + CSR (+ cert if self-sign)
         key_file, csr_file, cert_file = generate_cert(dns_name, ip_addr, self_sign)
         if self_sign and cert_file:
             st.success(f"Generated {key_file.name}, {csr_file.name}, {cert_file.name}")
         else:
             st.success(f"Generated {key_file.name}, {csr_file.name} (unsigned CSR only)")
 
+        # Bundle key+CSR into zip
         buf = BytesIO()
         with zipfile.ZipFile(buf, "w") as z:
             z.write(key_file, arcname=key_file.name)
@@ -232,6 +250,7 @@ with tabs[1]:
 # --- Tab 3: Settings ---
 with tabs[2]:
     st.subheader("Certificate Metadata")
+    # Editable metadata form
     country = st.text_input("Country", metadata["country"])
     state = st.text_input("State", metadata["state"])
     locality = st.text_input("Locality", metadata["locality"])
@@ -241,6 +260,7 @@ with tabs[2]:
     default_password = st.text_input("Default password", type="password", value=metadata.get("default_password", ""))
 
     if st.button("Save Settings"):
+        # Persist updated metadata
         metadata.update({
             "country": country,
             "state": state,
