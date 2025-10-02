@@ -20,7 +20,7 @@ Root CA tab:
 - DANGER ZONE: Resets CA to factory settings. Useful for lab environments.
 
 Certs tab:
-- Upload CSR to sign, self explanitory.
+- Upload CSR to sign by Root CA, self explanitory.
 - Generate new cert, using service/host.domain.name, & IP. 
   - Creates key pair, CSR, and cert when self signed.
   - Can also toggle for generating keypairs and CSR's. 
