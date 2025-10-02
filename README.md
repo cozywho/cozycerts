@@ -23,7 +23,7 @@ Certs tab:
 - Upload CSR to sign by Root CA, self explanitory.
 - Generate new cert, using service/host.domain.name, & IP. 
   - Creates key pair, CSR, and cert when self signed.
-  - Can also toggle for generating keypairs and CSR's. 
+  - Can also toggle for generating keypairs and CSR's for other CA's.
 
 Settings tab:
 - Edit cert metadata. Will probably rename to 'Metadata'
