@@ -3,18 +3,17 @@ from pathlib import Path
 from datetime import datetime
 import yaml
 import zipfile
+import re
 
 # --- Directories ---
-BASE_DIR = Path(".")                     # project root
-CA_DIR = BASE_DIR / "ca"                 # directory for CA keys, certs, config
-CERTS_DIR = BASE_DIR / "certs"           # directory for issued certs
-EXPORT_DIR = BASE_DIR / "exports"        # directory for exported cert bundles
+BASE_DIR = Path(".")
+CA_DIR = BASE_DIR / "ca"
+CERTS_DIR = BASE_DIR / "certs"
+EXPORT_DIR = BASE_DIR / "exports"
 
-# Ensure directories exist
 for d in [CA_DIR, CERTS_DIR, EXPORT_DIR]:
     d.mkdir(exist_ok=True)
 
-# File paths for CA assets and metadata
 CA_KEY = CA_DIR / "rootCA.key"
 CA_CERT = CA_DIR / "rootCA.crt"
 META_FILE = BASE_DIR / "metadata.yaml"
@@ -27,39 +26,44 @@ default_meta = {
     "locality": "Lab",
     "org": "CozyCerts",
     "ou": "General",
-    "days": 365,              # default cert validity
-    "default_password": ""    # used for PKCS12/JKS exports
+    "days": 365,
+    "default_password": ""
 }
 
-# Load saved metadata if present, otherwise use defaults
+# Load metadata safely with fallback merging
 if META_FILE.exists():
     with open(META_FILE) as f:
-        metadata = yaml.safe_load(f)
+        stored = yaml.safe_load(f) or {}
+    metadata = {**default_meta, **stored}
 else:
     metadata = default_meta.copy()
 
+
 # --- Helpers ---
 def save_metadata(data):
-    """Write metadata back to metadata.yaml."""
     with open(META_FILE, "w") as f:
         yaml.safe_dump(data, f)
 
+
 def create_root_ca():
-    """Generate a new Root CA (private key + self-signed certificate)."""
-    # Initialize CA database and bookkeeping files if missing
+    if not OPENSSL_CNF.exists():
+        raise FileNotFoundError("Missing openssl.cnf inside ca/")
+
+    # init DB if not present
     (CA_DIR / "index.txt").touch(exist_ok=True)
     if not (CA_DIR / "serial").exists():
         (CA_DIR / "serial").write_text("1000\n")
     if not (CA_DIR / "crlnumber").exists():
         (CA_DIR / "crlnumber").write_text("1000\n")
 
-    # Generate CA private key
+    # ensure newcerts/ exists (required by openssl)
+    (CA_DIR / "newcerts").mkdir(exist_ok=True)
+
     subprocess.run(["openssl", "genrsa", "-out", str(CA_KEY), "4096"], check=True)
-
-    # Build subject string from metadata
-    subj = f"/C={metadata['country']}/ST={metadata['state']}/L={metadata['locality']}/O={metadata['org']}/OU=CA/CN=CozyRoot"
-
-    # Generate self-signed root certificate
+    subj = (
+        f"/C={metadata['country']}/ST={metadata['state']}/L={metadata['locality']}"
+        f"/O={metadata['org']}/OU=CA/CN=CozyRoot"
+    )
     subprocess.run(
         [
             "openssl", "req", "-x509", "-new", "-nodes",
@@ -71,24 +75,67 @@ def create_root_ca():
         check=True
     )
 
-def sign_csr(csr_file: Path, out_name: str, dns_name: str, ip_addr: str):
-    """Sign a CSR with the Root CA and embed SAN (DNS/IP)."""
-    cert_file = CERTS_DIR / f"{out_name}.crt"
-    ext_file = CERTS_DIR / f"{out_name}_ext.cnf"
+def guess_mime(filename: str):
+    ext = filename.lower().split(".")[-1]
+    return {
+        "crt": "application/x-x509-ca-cert",
+        "pem": "application/x-pem-file",
+        "der": "application/x-x509-ca-cert",
+        "p12": "application/x-pkcs12",
+        "pfx": "application/x-pkcs12",
+        "jks": "application/octet-stream",
+        "zip": "application/zip",
+        "key": "text/plain",
+        "csr": "text/plain"
+    }.get(ext, "application/octet-stream")
 
-    # Build SAN extension
+def _reset_ca():
+    # wipe everything under ca/ except openssl.cnf
+    for f in CA_DIR.glob("*"):
+        if f.name == "openssl.cnf":
+            continue
+        if f.is_file():
+            f.unlink()
+        elif f.is_dir():
+            shutil.rmtree(f)
+
+    # re-init OpenSSL bookkeeping
+    (CA_DIR / "index.txt").write_text("")
+    (CA_DIR / "serial").write_text("1000\n")
+    (CA_DIR / "crlnumber").write_text("1000\n")
+
+    # ensure newcerts exists
+    (CA_DIR / "newcerts").mkdir(parents=True, exist_ok=True)
+
+    # clear issued certs/keys/csrs
+    if CERTS_DIR.exists():
+        shutil.rmtree(CERTS_DIR)
+    CERTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # remove old CRL if present
+    crl_file = CA_DIR / "crl.pem"
+    if crl_file.exists():
+        crl_file.unlink()
+
+def sign_csr(csr_file: Path, out_name: str, dns_name: str, ip_addr: str):
+    if not OPENSSL_CNF.exists():
+        raise FileNotFoundError("Missing openssl.cnf inside ca/")
+
+    base = safe_name(out_name)
+    cert_file = CERTS_DIR / f"{base}.crt"
+    ext_file = CERTS_DIR / f"{base}_ext.cnf"
+
     san_entries = []
     if dns_name:
         san_entries.append(f"DNS:{dns_name}")
     if ip_addr:
         san_entries.append(f"IP:{ip_addr}")
 
-    # Write extension config file
     with open(ext_file, "w") as f:
         f.write("[ v3_req ]\n")
-        f.write("subjectAltName=" + ",".join(san_entries) + "\n")
+        if san_entries:
+            f.write("subjectAltName=" + ",".join(san_entries) + "\n")
 
-    # Call openssl ca to sign the CSR
     subprocess.run(
         [
             "openssl", "ca",
@@ -97,53 +144,41 @@ def sign_csr(csr_file: Path, out_name: str, dns_name: str, ip_addr: str):
             "-extfile", str(ext_file),
             "-in", str(csr_file),
             "-out", str(cert_file),
-            "-batch"   # suppress interactive prompts
+            "-batch"
         ],
         check=True
     )
+
+    # cleanup extfile
+    ext_file.unlink(missing_ok=True)
+
     return cert_file
 
+
 def generate_cert(dns_name: str, ip_addr: str, self_sign: bool = True):
-    """Generate a new keypair, CSR, and optionally a signed certificate."""
-    key_file = CERTS_DIR / f"{dns_name}.key"
-    csr_file = CERTS_DIR / f"{dns_name}.csr"
-    cert_file = CERTS_DIR / f"{dns_name}.crt"
+    base = safe_name(dns_name)
+    key_file = CERTS_DIR / f"{base}.key"
+    csr_file = CERTS_DIR / f"{base}.csr"
 
-    # Build subject
-    subj = f"/C={metadata['country']}/ST={metadata['state']}/L={metadata['locality']}/O={metadata['org']}/OU={metadata['ou']}/CN={dns_name}"
+    subj = (
+        f"/C={metadata['country']}/ST={metadata['state']}/L={metadata['locality']}"
+        f"/O={metadata['org']}/OU={metadata['ou']}/CN={dns_name}"
+    )
 
-    # Build SAN string for CSR
-    san_entries = []
-    if dns_name:
-        san_entries.append(f"DNS:{dns_name}")
-    if ip_addr:
-        san_entries.append(f"IP:{ip_addr}")
-    san_str = ",".join(san_entries)
-
-    # Generate private key
     subprocess.run(["openssl", "genrsa", "-out", str(key_file), "2048"], check=True)
+    subprocess.run(
+        ["openssl", "req", "-new", "-key", str(key_file), "-subj", subj, "-out", str(csr_file)],
+        check=True
+    )
 
-    # Generate CSR, including SANs if present
-    csr_cmd = [
-        "openssl", "req", "-new",
-        "-key", str(key_file),
-        "-subj", subj,
-        "-out", str(csr_file)
-    ]
-    if san_entries:
-        csr_cmd.extend(["-addext", f"subjectAltName={san_str}"])
-    subprocess.run(csr_cmd, check=True)
-
-    # Optionally sign with Root CA
     if self_sign:
-        sign_csr(csr_file, dns_name, dns_name, ip_addr)
-        return key_file, csr_file, cert_file
-    else:
-        # return key + CSR only (unsigned)
-        return key_file, csr_file, None
+        cert_path = sign_csr(csr_file, dns_name, dns_name, ip_addr)
+        return key_file, csr_file, cert_path
+
+    return key_file, csr_file, None
+
 
 def get_cert_expiry(cert_file: Path):
-    """Parse certificate expiration date with OpenSSL."""
     try:
         result = subprocess.run(
             ["openssl", "x509", "-enddate", "-noout", "-in", str(cert_file)],
@@ -154,18 +189,18 @@ def get_cert_expiry(cert_file: Path):
     except Exception:
         return None
 
+
 def export_certificate(name: str, fmt: str, password: str = None):
-    """Export certificate in various formats (PEM, DER, PKCS12, JKS, bundle)."""
-    crt = CERTS_DIR / f"{name}.crt"
-    key = CERTS_DIR / f"{name}.key"
-    out_file = EXPORT_DIR / f"{name}.{fmt.lower()}"
+    base = safe_name(name)
+    crt = CERTS_DIR / f"{base}.crt"
+    key = CERTS_DIR / f"{base}.key"
+    out_file = EXPORT_DIR / f"{base}.{fmt.lower()}"
 
     if not crt.exists():
         return None, "Missing certificate file"
 
     try:
         if fmt.upper() == "PEM":
-            # Concatenate key + cert + CA cert
             parts = []
             if key.exists():
                 parts.append(key.read_text())
@@ -175,54 +210,63 @@ def export_certificate(name: str, fmt: str, password: str = None):
             out_file.write_text("\n".join(parts))
 
         elif fmt.upper() == "DER":
-            # Binary encoding of cert only
             subprocess.run(
                 ["openssl", "x509", "-in", str(crt), "-outform", "der", "-out", str(out_file)],
                 check=True
             )
 
         elif fmt.upper() == "PKCS12":
-            # Export to .p12 container (cert + key + CA)
             password = password or metadata["default_password"]
             if not password:
                 return None, "Password required for PKCS#12 export"
             subprocess.run(
-                ["openssl", "pkcs12", "-export",
-                 "-inkey", str(key), "-in", str(crt),
-                 "-certfile", str(CA_CERT), "-out", str(out_file),
-                 "-password", f"pass:{password}"],
+                [
+                    "openssl", "pkcs12", "-export",
+                    "-inkey", str(key), "-in", str(crt),
+                    "-certfile", str(CA_CERT),
+                    "-out", str(out_file),
+                    "-password", f"pass:{password}"
+                ],
                 check=True
             )
 
         elif fmt.upper() == "JKS":
-            # Convert P12 → JKS with keytool
             password = password or metadata["default_password"]
             if not password:
                 return None, "Password required for JKS export"
-            p12_file = EXPORT_DIR / f"{name}.p12"
+
+            p12_temp = EXPORT_DIR / f"{base}_temp.p12"
+
             subprocess.run(
-                ["openssl", "pkcs12", "-export",
-                 "-inkey", str(key), "-in", str(crt),
-                 "-certfile", str(CA_CERT), "-out", str(p12_file),
-                 "-password", f"pass:{password}"],
-                check=True
-            )
-            subprocess.run(
-                ["keytool", "-importkeystore",
-                 "-srckeystore", str(p12_file), "-srcstoretype", "PKCS12", "-srcstorepass", password,
-                 "-destkeystore", str(out_file), "-deststoretype", "JKS", "-deststorepass", password],
+                [
+                    "openssl", "pkcs12", "-export",
+                    "-inkey", str(key), "-in", str(crt),
+                    "-certfile", str(CA_CERT),
+                    "-out", str(p12_temp),
+                    "-password", f"pass:{password}"
+                ],
                 check=True
             )
 
+            subprocess.run(
+                [
+                    "keytool", "-importkeystore",
+                    "-srckeystore", str(p12_temp), "-srcstoretype", "PKCS12", "-srcstorepass", password,
+                    "-destkeystore", str(out_file), "-deststoretype", "JKS", "-deststorepass", password
+                ],
+                check=True
+            )
+
+            p12_temp.unlink(missing_ok=True)
+
         elif fmt.upper() == "BUNDLE":
-            # Create ZIP with cert, key, CA, and fullchain
-            fullchain_file = EXPORT_DIR / f"{name}_fullchain.pem"
+            fullchain_file = EXPORT_DIR / f"{base}_fullchain.pem"
             parts = [crt.read_text()]
             if CA_CERT.exists():
                 parts.append(CA_CERT.read_text())
             fullchain_file.write_text("\n".join(parts))
 
-            zip_file = EXPORT_DIR / f"{name}_bundle.zip"
+            zip_file = EXPORT_DIR / f"{base}_bundle.zip"
             with zipfile.ZipFile(zip_file, "w") as zf:
                 zf.write(crt, arcname=f"{name}.crt")
                 if key.exists():
@@ -237,11 +281,12 @@ def export_certificate(name: str, fmt: str, password: str = None):
             return None, f"Unsupported format: {fmt}"
 
         return out_file, f"Exported {name} as {fmt}"
+
     except subprocess.CalledProcessError as e:
         return None, f"Error exporting: {e}"
 
+
 def revoke_cert(name: str):
-    """Revoke a certificate and update CRL."""
     crt = CERTS_DIR / f"{name}.crt"
     crl = CA_DIR / "crl.pem"
 
@@ -249,21 +294,19 @@ def revoke_cert(name: str):
         return False, "Certificate not found"
 
     try:
-        # Mark cert as revoked
         subprocess.run(
-            ["openssl", "ca",
-             "-config", str(OPENSSL_CNF),
-             "-revoke", str(crt)],
+            ["openssl", "ca", "-config", str(OPENSSL_CNF), "-revoke", str(crt)],
             check=True
         )
-        # Regenerate CRL
         subprocess.run(
-            ["openssl", "ca",
-             "-config", str(OPENSSL_CNF),
-             "-gencrl",
-             "-out", str(crl)],
+            ["openssl", "ca", "-config", str(OPENSSL_CNF), "-gencrl", "-out", str(crl)],
             check=True
         )
         return True, f"{name} revoked. CRL updated."
     except subprocess.CalledProcessError as e:
         return False, f"Revocation failed: {e}"
+
+
+def safe_name(name: str) -> str:
+    return re.sub(r'[^A-Za-z0-9.-]', '_', name)
+
