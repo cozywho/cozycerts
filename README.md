@@ -1,6 +1,6 @@
 # cozycerts
 OpenSSL wrapped in streamlit so dummies like me can use it lazily.  
-A self contained CA intended to work across linux environments.  
+A self contained CA intended to work in a venv environments.  
 
 git clone in whatever directory you want cozycerts to live.  
 /opt/cozycerts, /home/$user/cozycerts, /etc/cozycerts, wherever.  
