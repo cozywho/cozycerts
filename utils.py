@@ -75,6 +75,12 @@ def create_root_ca():
         check=True
     )
 
+    crl_file = CA_DIR / "crl.pem"
+    subprocess.run(
+        ["openssl", "ca", "-config", str(OPENSSL_CNF), "-gencrl", "-out", str(crl_file)],
+        check=True
+    )
+
 def guess_mime(filename: str):
     ext = filename.lower().split(".")[-1]
     return {
