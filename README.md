@@ -11,7 +11,7 @@ cd cozycerts
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-streamlit run main.py --server.address 0.0.0.0 --server.port 8501
+streamlit run main.py
 ```
 
 Root CA tab:
@@ -20,10 +20,10 @@ Root CA tab:
 - DANGER ZONE: Resets CA to factory settings. Useful for lab environments.
 
 Certs tab:
-- Upload CSR to sign by Root CA, self explanitory.
 - Generate new cert, using service/host.domain.name, & IP. 
   - Creates key pair, CSR, and cert when self signed.
   - Can also toggle for generating keypairs and CSR's for other CA's.
+- Upload CSR to sign by Root CA, self explanitory.
 
-Settings tab:
-- Edit cert metadata. Will probably rename to 'Metadata'
+Metadata tab:
+- Edit cert metadata.
