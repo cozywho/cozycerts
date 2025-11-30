@@ -17,13 +17,19 @@ streamlit run main.py
 Root CA tab:
 - On first startup, create your Root CA.
 - View and manage your inventory of certs signed by the CA.
-- DANGER ZONE: Resets CA to factory settings. Useful for lab environments.
+- Buttons for downloading, revoking, and converting.
 
-Certs tab:
-- Generate new cert, using service/host.domain.name, & IP. 
+Generate tab:
+- Generate new certs.
   - Creates key pair, CSR, and cert when self signed.
   - Can also toggle for generating keypairs and CSR's for other CA's.
 - Upload CSR to sign by Root CA, self explanitory.
 
 Metadata tab:
 - Edit cert metadata.
+
+Inspect tab:
+- Allows for certificate inspection.
+
+Reset tab:
+- Factory reset your CA. Comment out the code if in production.
