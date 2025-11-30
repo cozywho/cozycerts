@@ -32,7 +32,7 @@ col1, col2 = st.columns([1, 4])
 with col1:
     st.image("cprl.png", width=90)
 with col2:
-    st.title("cozycerts v3.0")
+    st.title("cozycerts v2.0")
 
 tabs = st.tabs(["Root CA", "Generate", "Metadata", "Inspect", "Reset"])
 
