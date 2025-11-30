@@ -136,18 +136,30 @@ with tabs[0]:
 
         if selected:
             selected_str = ", ".join(selected)
-            st.markdown(
-                f"<div style='font-size:1rem; font-weight:600;'>Selected Certs: {selected_str}</div>",
-                unsafe_allow_html=True,
-            )
-
             action = st.selectbox(
-                "",
-                ["Revoke", "Delete", "Export"],
+                    f"Selected Certs: {selected_str}",
+                ["Download", "Export", "Revoke", "Delete"],
                 key="action_choice"
             )
 
-            if action == "Revoke":
+            if action == "Download":
+                if st.button("Download Selected"):
+                    buf = BytesIO()
+                    with zipfile.ZipFile(buf, "w") as z:
+                        for cn in selected:
+                            cert_path = CERTS_DIR / cn
+                            if cert_path.exists():
+                                for f in cert_path.iterdir():
+                                    z.write(f, arcname=f"{cn}/{f.name}")
+        
+                    st.download_button(
+                        "⬇ Download ZIP",
+                        data=buf.getvalue(),
+                        file_name="selected_certs.zip",
+                        mime="application/zip",
+            )
+
+            elif action == "Revoke":
                 st.warning("Revoking a certificate cannot be undone.")
                 if st.button("Confirm Revoke"):
                     for cn in selected:
