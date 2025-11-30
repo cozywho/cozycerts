@@ -4,6 +4,7 @@ from datetime import datetime
 import yaml
 import zipfile
 import re
+import shutil
 
 # --- Directories ---
 BASE_DIR = Path(".")
@@ -39,12 +40,47 @@ else:
     metadata = default_meta.copy()
 
 
-# --- Helpers ---
+# --- App-level helpers ---
 def save_metadata(data):
     with open(META_FILE, "w") as f:
         yaml.safe_dump(data, f)
 
 
+def guess_mime(filename: str):
+    ext = filename.lower().split(".")[-1]
+    return {
+        "crt": "application/x-x509-ca-cert",
+        "pem": "application/x-pem-file",
+        "der": "application/x-x509-ca-cert",
+        "p12": "application/x-pkcs12",
+        "pfx": "application/x-pkcs12",
+        "jks": "application/octet-stream",
+        "zip": "application/zip",
+        "key": "text/plain",
+        "csr": "text/plain"
+    }.get(ext, "application/octet-stream")
+
+
+def safe_name(name: str) -> str:
+    return re.sub(r'[^A-Za-z0-9.-]', '_', name or "cert")
+
+
+# --- Per-cert metadata helpers ---
+def write_cert_metadata(cert_dir: Path, data: dict):
+    meta_file = cert_dir / "metadata.yaml"
+    with open(meta_file, "w") as f:
+        yaml.safe_dump(data, f)
+
+
+def load_cert_metadata(cert_dir: Path):
+    meta_file = cert_dir / "metadata.yaml"
+    if meta_file.exists():
+        with open(meta_file) as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+# --- CA helpers ---
 def create_root_ca():
     if not OPENSSL_CNF.exists():
         raise FileNotFoundError("Missing openssl.cnf inside ca/")
@@ -74,26 +110,8 @@ def create_root_ca():
         ],
         check=True
     )
+    # NO initial CRL here; we create CRL after first cert issuance
 
-    crl_file = CA_DIR / "crl.pem"
-    subprocess.run(
-        ["openssl", "ca", "-config", str(OPENSSL_CNF), "-gencrl", "-out", str(crl_file)],
-        check=True
-    )
-
-def guess_mime(filename: str):
-    ext = filename.lower().split(".")[-1]
-    return {
-        "crt": "application/x-x509-ca-cert",
-        "pem": "application/x-pem-file",
-        "der": "application/x-x509-ca-cert",
-        "p12": "application/x-pkcs12",
-        "pfx": "application/x-pkcs12",
-        "jks": "application/octet-stream",
-        "zip": "application/zip",
-        "key": "text/plain",
-        "csr": "text/plain"
-    }.get(ext, "application/octet-stream")
 
 def _reset_ca():
     # wipe everything under ca/ except openssl.cnf
@@ -123,19 +141,42 @@ def _reset_ca():
     if crl_file.exists():
         crl_file.unlink()
 
-def sign_csr(csr_file: Path, out_name: str, dns_name: str, ip_addr: str):
+
+def get_cert_expiry(cert_file: Path):
+    try:
+        result = subprocess.run(
+            ["openssl", "x509", "-enddate", "-noout", "-in", str(cert_file)],
+            capture_output=True, text=True, check=True
+        )
+        date_str = result.stdout.strip().split("=", 1)[1].strip()
+        return datetime.strptime(date_str, "%b %d %H:%M:%S %Y GMT")
+    except Exception:
+        return None
+
+
+# --- Cert / CSR generation + signing (multi-SAN aware) ---
+def sign_csr(
+    csr_file: Path,
+    out_name: str,
+    dns_list: list[str],
+    ip_list: list[str],
+    cn: str | None = None
+) -> Path:
     if not OPENSSL_CNF.exists():
         raise FileNotFoundError("Missing openssl.cnf inside ca/")
 
     base = safe_name(out_name)
-    cert_file = CERTS_DIR / f"{base}.crt"
-    ext_file = CERTS_DIR / f"{base}_ext.cnf"
+    cert_dir = CERTS_DIR / base
+    cert_dir.mkdir(exist_ok=True)
 
-    san_entries = []
-    if dns_name:
-        san_entries.append(f"DNS:{dns_name}")
-    if ip_addr:
-        san_entries.append(f"IP:{ip_addr}")
+    cert_file = cert_dir / "cert.crt"
+    ext_file = cert_dir / "ext.cnf"
+
+    san_entries: list[str] = []
+    for d in dns_list or []:
+        san_entries.append(f"DNS:{d}")
+    for ip in ip_list or []:
+        san_entries.append(f"IP:{ip}")
 
     with open(ext_file, "w") as f:
         f.write("[ v3_req ]\n")
@@ -155,20 +196,59 @@ def sign_csr(csr_file: Path, out_name: str, dns_name: str, ip_addr: str):
         check=True
     )
 
-    # cleanup extfile
     ext_file.unlink(missing_ok=True)
+
+    # metadata
+    expiry = get_cert_expiry(cert_file)
+    expiry_str = expiry.strftime("%Y-%m-%dT%H:%M:%SZ") if expiry else None
+    cn_value = cn or (dns_list[0] if dns_list else base)
+
+    meta = {
+        "name": base,
+        "cn": cn_value,
+        "dns": dns_list or [],
+        "ips": ip_list or [],
+        "created": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "expires": expiry_str,
+        "signed_by": "CozyRoot",
+        "revoked": False,
+    }
+    write_cert_metadata(cert_dir, meta)
+
+    # ensure CRL exists after first issued cert; ignore failures
+    crl_file = CA_DIR / "crl.pem"
+    if not crl_file.exists():
+        try:
+            subprocess.run(
+                ["openssl", "ca", "-config", str(OPENSSL_CNF), "-gencrl", "-out", str(crl_file)],
+                check=True
+            )
+        except subprocess.CalledProcessError:
+            pass
 
     return cert_file
 
 
-def generate_cert(dns_name: str, ip_addr: str, self_sign: bool = True):
-    base = safe_name(dns_name)
-    key_file = CERTS_DIR / f"{base}.key"
-    csr_file = CERTS_DIR / f"{base}.csr"
+def generate_cert(
+    cn: str,
+    dns_list: list[str],
+    ip_list: list[str],
+    self_sign: bool = True
+):
+    # derive a base name from CN or first DNS entry
+    base_name_source = cn or (dns_list[0] if dns_list else None)
+    base = safe_name(base_name_source or "cert")
 
+    cert_dir = CERTS_DIR / base
+    cert_dir.mkdir(exist_ok=True)
+
+    key_file = cert_dir / "key.pem"
+    csr_file = cert_dir / "req.csr"
+
+    subject_cn = base_name_source or base
     subj = (
         f"/C={metadata['country']}/ST={metadata['state']}/L={metadata['locality']}"
-        f"/O={metadata['org']}/OU={metadata['ou']}/CN={dns_name}"
+        f"/O={metadata['org']}/OU={metadata['ou']}/CN={subject_cn}"
     )
 
     subprocess.run(["openssl", "genrsa", "-out", str(key_file), "2048"], check=True)
@@ -178,28 +258,29 @@ def generate_cert(dns_name: str, ip_addr: str, self_sign: bool = True):
     )
 
     if self_sign:
-        cert_path = sign_csr(csr_file, dns_name, dns_name, ip_addr)
-        return key_file, csr_file, cert_path
+        cert_file = sign_csr(csr_file, base, dns_list, ip_list, cn=subject_cn)
+        return key_file, csr_file, cert_file
 
+    # CSR-only mode: still track metadata
+    meta = {
+        "name": base,
+        "cn": subject_cn,
+        "dns": dns_list or [],
+        "ips": ip_list or [],
+        "created": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "expires": None,
+        "signed_by": None,
+        "revoked": False,
+    }
+    write_cert_metadata(cert_dir, meta)
     return key_file, csr_file, None
-
-
-def get_cert_expiry(cert_file: Path):
-    try:
-        result = subprocess.run(
-            ["openssl", "x509", "-enddate", "-noout", "-in", str(cert_file)],
-            capture_output=True, text=True, check=True
-        )
-        date_str = result.stdout.strip().split("=", 1)[1].strip()
-        return datetime.strptime(date_str, "%b %d %H:%M:%S %Y GMT")
-    except Exception:
-        return None
 
 
 def export_certificate(name: str, fmt: str, password: str = None):
     base = safe_name(name)
-    crt = CERTS_DIR / f"{base}.crt"
-    key = CERTS_DIR / f"{base}.key"
+    cert_dir = CERTS_DIR / base
+    crt = cert_dir / "cert.crt"
+    key = cert_dir / "key.pem"
     out_file = EXPORT_DIR / f"{base}.{fmt.lower()}"
 
     if not crt.exists():
@@ -293,26 +374,81 @@ def export_certificate(name: str, fmt: str, password: str = None):
 
 
 def revoke_cert(name: str):
-    crt = CERTS_DIR / f"{name}.crt"
+    base = safe_name(name)
+    cert_dir = CERTS_DIR / base
+    cert_file = cert_dir / "cert.crt"
     crl = CA_DIR / "crl.pem"
 
-    if not crt.exists():
+    if not cert_file.exists():
         return False, "Certificate not found"
 
     try:
         subprocess.run(
-            ["openssl", "ca", "-config", str(OPENSSL_CNF), "-revoke", str(crt)],
+            ["openssl", "ca", "-config", str(OPENSSL_CNF), "-revoke", str(cert_file)],
             check=True
         )
         subprocess.run(
             ["openssl", "ca", "-config", str(OPENSSL_CNF), "-gencrl", "-out", str(crl)],
             check=True
         )
+
+        meta = load_cert_metadata(cert_dir)
+        meta["revoked"] = True
+        write_cert_metadata(cert_dir, meta)
+
         return True, f"{name} revoked. CRL updated."
     except subprocess.CalledProcessError as e:
         return False, f"Revocation failed: {e}"
 
 
-def safe_name(name: str) -> str:
-    return re.sub(r'[^A-Za-z0-9.-]', '_', name)
+# --- Generic inspector ---
+def inspect_cert(cert_bytes: bytes, password: str = None):
+    temp = BASE_DIR / "temp_inspect"
+    temp.mkdir(exist_ok=True)
+
+    tmpfile = temp / "upload.bin"
+    tmpfile.write_bytes(cert_bytes)
+
+    # Try PEM/CRT
+    result = subprocess.run(
+        ["openssl", "x509", "-in", str(tmpfile), "-noout", "-text"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        tmpfile.unlink(missing_ok=True)
+        return "X509 (PEM)", result.stdout
+
+    # Try DER
+    result = subprocess.run(
+        ["openssl", "x509", "-in", str(tmpfile), "-inform", "der", "-noout", "-text"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        tmpfile.unlink(missing_ok=True)
+        return "X509 (DER)", result.stdout
+
+    # Try CSR
+    result = subprocess.run(
+        ["openssl", "req", "-in", str(tmpfile), "-noout", "-text"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        tmpfile.unlink(missing_ok=True)
+        return "CSR", result.stdout
+
+    # Try PKCS#12 / PFX
+    if password:
+        result = subprocess.run(
+            [
+                "openssl", "pkcs12", "-in", str(tmpfile),
+                "-nodes", "-password", f"pass:{password}"
+            ],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            tmpfile.unlink(missing_ok=True)
+            return "PKCS#12 / PFX", result.stdout
+
+    tmpfile.unlink(missing_ok=True)
+    return "Unknown", "Unable to parse certificate or CSR."
 
