@@ -485,3 +485,18 @@ def inspect_cert(cert_bytes: bytes, password: Optional[str] = None):
     tmp.unlink(missing_ok=True)
     return "Unknown", "Unable to parse."
 
+def fmt_expiry(expiry_dt: datetime | None):
+    if not expiry_dt:
+        return "Unknown", "-", "⚪"
+    days = (expiry_dt - datetime.utcnow()).days
+    emoji = "🟢" if days >= 180 else "🟡" if days >= 90 else "🔴"
+    return expiry_dt.strftime("%d%b%Y @ %H:%M UTC"), days, emoji
+
+
+def parse_expiry(meta, crt_path):
+    if meta and meta.get("expires"):
+        try:
+            return datetime.strptime(meta["expires"], "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            return None
+    return get_cert_expiry(crt_path) if crt_path.exists() else None
