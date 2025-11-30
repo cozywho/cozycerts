@@ -17,7 +17,7 @@ streamlit run main.py
 Root CA tab:
 - On first startup, create your Root CA.
 - View and manage your inventory of certs signed by the CA.
-- Buttons for downloading, revoking, and converting.
+- Select entries, then use buttons for downloading, revoking, deleting, and converting.
 
 Generate tab:
 - Generate new certs.
