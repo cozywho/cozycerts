@@ -104,20 +104,23 @@ with tabs[0]:
             meta = load_cert_metadata(cert_dir)
             revoked = bool(meta.get("revoked", False)) if meta else False
 
-            expiry_str, days_left, status = fmt_expiry(parse_expiry(meta, crt))
+            expiry_raw = parse_expiry(meta, crt)
+            expiry_str, days_left, color = fmt_expiry(expiry_raw)
 
             if revoked:
-                status = "⚫"
+                color = "⚫"
             elif not crt.exists():
-                status = "⚪"
+                color = "⚪"
+
+            expiry_display = expiry_str
+            days_display = f"{color} {days_left}"
 
             rows.append({
                 "CN": name,
                 "DNS": ", ".join(meta.get("dns", [])) if meta else "",
                 "IP": ", ".join(meta.get("ips", [])) if meta else "",
-                "Expires": expiry_str,
-                "Days Left": days_left,
-                "Status": status,
+                "Expires": expiry_display,
+                "Days Left": days_display,
                 "selected": False,
             })
 
@@ -129,15 +132,16 @@ with tabs[0]:
             column_config={
                 "selected": st.column_config.CheckboxColumn("Select")
             },
-            disabled=["CN", "DNS", "IP", "Expires", "Days Left", "Status"],
+            disabled=["CN", "DNS", "IP", "Expires", "Days Left"],
         )
 
         selected = edited[edited["selected"] == True]["CN"].tolist()
 
         if selected:
             selected_str = ", ".join(selected)
+
             action = st.selectbox(
-                    f"Selected Certs: {selected_str}",
+                f"Selected Certs: {selected_str}",
                 ["Download", "Export", "Revoke", "Delete"],
                 key="action_choice"
             )
@@ -151,32 +155,13 @@ with tabs[0]:
                             if cert_path.exists():
                                 for f in cert_path.iterdir():
                                     z.write(f, arcname=f"{cn}/{f.name}")
-        
+
                     st.download_button(
                         "⬇ Download ZIP",
                         data=buf.getvalue(),
                         file_name="selected_certs.zip",
                         mime="application/zip",
-            )
-
-            elif action == "Revoke":
-                st.warning("Revoking a certificate cannot be undone.")
-                if st.button("Confirm Revoke"):
-                    for cn in selected:
-                        revoke_cert(cn)
-                    st.success("Revoked.")
-                    st.rerun()
-
-            elif action == "Delete":
-                st.error("This will permanently delete the certificate files.")
-                if st.button("Confirm Delete"):
-                    import shutil
-                    for cn in selected:
-                        cert_path = CERTS_DIR / cn
-                        if cert_path.exists():
-                            shutil.rmtree(cert_path)
-                    st.success("Deleted.")
-                    st.rerun()
+                    )
 
             elif action == "Export":
                 fmt = st.selectbox(
@@ -203,6 +188,25 @@ with tabs[0]:
                         file_name="certs_export.zip",
                         mime="application/zip",
                     )
+
+            elif action == "Revoke":
+                st.warning("Revoking a certificate cannot be undone.")
+                if st.button("Confirm Revoke"):
+                    for cn in selected:
+                        revoke_cert(cn)
+                    st.success("Revoked.")
+                    st.rerun()
+
+            elif action == "Delete":
+                st.error("This will permanently delete the certificate files.")
+                if st.button("Confirm Delete"):
+                    import shutil
+                    for cn in selected:
+                        path = CERTS_DIR / cn
+                        if path.exists():
+                            shutil.rmtree(path)
+                    st.success("Deleted.")
+                    st.rerun()
 
 
 with tabs[1]:
@@ -260,7 +264,7 @@ with tabs[2]:
 
 
 with tabs[3]:
-    st.subheader("Inspect Certificate / CSR / PKCS#12")
+    st.subheader("Inspect")
 
     uploaded = st.file_uploader("Upload file", type=["crt", "pem", "cer", "csr", "der", "p12", "pfx"])
 
