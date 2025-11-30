@@ -1,14 +1,12 @@
 import subprocess
 from pathlib import Path
 from datetime import datetime
+from typing import Optional, List, Tuple
 import yaml
 import zipfile
 import re
 import shutil
 
-# ------------------------------------------------------------
-# Directories
-# ------------------------------------------------------------
 BASE_DIR = Path(".")
 CA_DIR = BASE_DIR / "ca"
 CERTS_DIR = BASE_DIR / "certs"
@@ -22,9 +20,6 @@ CA_CERT = CA_DIR / "rootCA.crt"
 META_FILE = BASE_DIR / "metadata.yaml"
 OPENSSL_CNF = CA_DIR / "openssl.cnf"
 
-# ------------------------------------------------------------
-# Default metadata
-# ------------------------------------------------------------
 default_meta = {
     "country": "US",
     "state": "NC",
@@ -32,7 +27,7 @@ default_meta = {
     "org": "CozyCerts",
     "ou": "General",
     "days": 365,
-    "default_password": ""
+    "default_password": "",
 }
 
 if META_FILE.exists():
@@ -43,15 +38,12 @@ else:
     metadata = default_meta.copy()
 
 
-# ------------------------------------------------------------
-# App helpers
-# ------------------------------------------------------------
-def save_metadata(data):
+def save_metadata(data: dict) -> None:
     with open(META_FILE, "w") as f:
         yaml.safe_dump(data, f)
 
 
-def guess_mime(filename: str):
+def guess_mime(filename: str) -> str:
     ext = filename.lower().split(".")[-1]
     return {
         "crt": "application/x-x509-ca-cert",
@@ -70,15 +62,12 @@ def safe_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9.-]", "_", name or "cert")
 
 
-# ------------------------------------------------------------
-# Per-cert metadata
-# ------------------------------------------------------------
-def write_cert_metadata(cert_dir: Path, data: dict):
+def write_cert_metadata(cert_dir: Path, data: dict) -> None:
     with open(cert_dir / "metadata.yaml", "w") as f:
         yaml.safe_dump(data, f)
 
 
-def load_cert_metadata(cert_dir: Path):
+def load_cert_metadata(cert_dir: Path) -> dict:
     mf = cert_dir / "metadata.yaml"
     if mf.exists():
         with open(mf) as f:
@@ -86,10 +75,7 @@ def load_cert_metadata(cert_dir: Path):
     return {}
 
 
-# ------------------------------------------------------------
-# CA creation / reset
-# ------------------------------------------------------------
-def create_root_ca():
+def create_root_ca() -> None:
     if not OPENSSL_CNF.exists():
         raise FileNotFoundError("Missing openssl.cnf inside ca/")
 
@@ -110,18 +96,26 @@ def create_root_ca():
 
     subprocess.run(
         [
-            "openssl", "req", "-x509", "-new", "-nodes",
-            "-key", str(CA_KEY),
+            "openssl",
+            "req",
+            "-x509",
+            "-new",
+            "-nodes",
+            "-key",
+            str(CA_KEY),
             "-sha256",
-            "-days", str(metadata["days"]),
-            "-subj", subj,
-            "-out", str(CA_CERT),
+            "-days",
+            str(metadata["days"]),
+            "-subj",
+            subj,
+            "-out",
+            str(CA_CERT),
         ],
         check=True,
     )
 
 
-def _reset_ca():
+def _reset_ca() -> None:
     for f in CA_DIR.glob("*"):
         if f.name == "openssl.cnf":
             continue
@@ -144,10 +138,7 @@ def _reset_ca():
         crl_file.unlink()
 
 
-# ------------------------------------------------------------
-# Expiry helper
-# ------------------------------------------------------------
-def get_cert_expiry(cert_file: Path) -> datetime | None:
+def get_cert_expiry(cert_file: Path) -> Optional[datetime]:
     try:
         result = subprocess.run(
             ["openssl", "x509", "-enddate", "-noout", "-in", str(cert_file)],
@@ -161,15 +152,12 @@ def get_cert_expiry(cert_file: Path) -> datetime | None:
         return None
 
 
-# ------------------------------------------------------------
-# Sign CSR (SAN aware)
-# ------------------------------------------------------------
 def sign_csr(
     csr_file: Path,
     out_name: str,
-    dns_list: list[str],
-    ip_list: list[str],
-    cn: str | None = None,
+    dns_list: List[str],
+    ip_list: List[str],
+    cn: Optional[str] = None,
 ) -> Path:
     if not OPENSSL_CNF.exists():
         raise FileNotFoundError("Missing openssl.cnf inside ca/")
@@ -181,7 +169,7 @@ def sign_csr(
     cert_file = cert_dir / "cert.crt"
     ext_file = cert_dir / "ext.cnf"
 
-    san = []
+    san: List[str] = []
     for d in dns_list or []:
         san.append(f"DNS:{d}")
     for ip in ip_list or []:
@@ -250,13 +238,10 @@ def sign_csr(
     return cert_file
 
 
-# ------------------------------------------------------------
-# Generate key + CSR + optional cert
-# ------------------------------------------------------------
 def generate_cert(
-    cn: str,
-    dns_list: list[str],
-    ip_list: list[str],
+    cn: Optional[str],
+    dns_list: List[str],
+    ip_list: List[str],
     self_sign: bool = True,
 ):
     base_src = cn or (dns_list[0] if dns_list else None)
@@ -300,10 +285,7 @@ def generate_cert(
     return key_file, csr_file, None
 
 
-# ------------------------------------------------------------
-# Exports
-# ------------------------------------------------------------
-def export_certificate(name: str, fmt: str, password: str = None):
+def export_certificate(name: str, fmt: str, password: Optional[str] = None) -> Tuple[Optional[Path], str]:
     base = safe_name(name)
     cert_dir = CERTS_DIR / base
     crt = cert_dir / "cert.crt"
@@ -317,7 +299,7 @@ def export_certificate(name: str, fmt: str, password: str = None):
         f = fmt.upper()
 
         if f == "PEM":
-            parts = []
+            parts: List[str] = []
             if key.exists():
                 parts.append(key.read_text())
             parts.append(crt.read_text())
@@ -428,10 +410,7 @@ def export_certificate(name: str, fmt: str, password: str = None):
         return None, f"Error: {e}"
 
 
-# ------------------------------------------------------------
-# Revocation + CRL
-# ------------------------------------------------------------
-def revoke_cert(name: str):
+def revoke_cert(name: str) -> Tuple[bool, str]:
     base = safe_name(name)
     cert_dir = CERTS_DIR / base
     cert_file = cert_dir / "cert.crt"
@@ -459,10 +438,7 @@ def revoke_cert(name: str):
         return False, f"Revocation failed: {e}"
 
 
-# ------------------------------------------------------------
-# Certificate / CSR / PKCS#12 inspector
-# ------------------------------------------------------------
-def inspect_cert(cert_bytes: bytes, password: str = None):
+def inspect_cert(cert_bytes: bytes, password: Optional[str] = None):
     temp = BASE_DIR / "temp_inspect"
     temp.mkdir(exist_ok=True)
 
