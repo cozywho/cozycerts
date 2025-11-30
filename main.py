@@ -36,7 +36,7 @@ st.markdown(
 )
 
 st.columns([1, 4])[0].image("cprl.png", width=90)
-st.title("cozycerts v3.0")
+st.title("cozycerts v2.0")
 
 tabs = st.tabs(["Root CA", "Generate", "Metadata", "Inspect", "Reset"])
 
