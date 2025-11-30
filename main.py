@@ -19,6 +19,8 @@ from utils import (
     safe_name,
     load_cert_metadata,
     inspect_cert,
+    fmt_expiry,
+    parse_expiry
 )
 
 st.set_page_config(page_title="cozycerts", layout="wide")
@@ -40,24 +42,6 @@ st.title("cozycerts v2.0")
 
 tabs = st.tabs(["Root CA", "Generate", "Metadata", "Inspect", "Reset"])
 
-
-def fmt_expiry(expiry_dt: datetime | None):
-    if not expiry_dt:
-        return "Unknown", "-", "⚪"
-    days = (expiry_dt - datetime.utcnow()).days
-    emoji = "🟢" if days >= 180 else "🟡" if days >= 90 else "🔴"
-    return expiry_dt.strftime("%d%b%Y @ %H:%M UTC"), days, emoji
-
-
-def parse_expiry(meta, crt_path):
-    if meta and meta.get("expires"):
-        try:
-            return datetime.strptime(meta["expires"], "%Y-%m-%dT%H:%M:%SZ")
-        except ValueError:
-            return None
-    return get_cert_expiry(crt_path) if crt_path.exists() else None
-
-
 with tabs[0]:
     st.subheader("Root CA")
 
@@ -77,7 +61,7 @@ with tabs[0]:
                 "⬇ Download Trusted Root Certificate",
                 data=CA_CERT.read_bytes(),
                 file_name="rootCA.crt",
-                mime="application/x-x509-ca-cert",
+                mime="application/octet-stream",
             )
 
             with st.expander("Install Instructions"):
