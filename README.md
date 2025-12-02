@@ -8,7 +8,7 @@ git clone in whatever directory you want cozycerts to live.
 ```bash
 git clone https://github.com/cozywho/cozycerts.git
 cd cozycerts
-python3 -m venv venv
+python3.11 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 streamlit run main.py
