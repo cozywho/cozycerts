@@ -33,3 +33,9 @@ Inspect tab:
 
 Reset tab:
 - Factory reset your CA. Comment out the code if in production.
+
+-----------------------
+
+Plans:
+Trust chain / SubCA.
+
