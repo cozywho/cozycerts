@@ -23,15 +23,28 @@ from utils import (
     parse_expiry
 )
 
-st.set_page_config(page_title="cozycerts", layout="wide")
+st.set_page_config(page_title="cozycerts", layout="centered")
 
 st.markdown(
     """
     <style>
-    div[data-testid="column"] button, div[data-testid="column"] .stDownloadButton button {
+
+    /* --- Your existing button sizing --- */
+    div[data-testid="column"] button,
+    div[data-testid="column"] .stDownloadButton button {
         padding: 0.35rem 0.75rem;
         font-size: 0.9rem;
     }
+
+    /* --- Force narrow window layout --- */
+    .block-container {
+        max-width: 700px !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True,
