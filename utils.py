@@ -41,7 +41,8 @@ else:
 def save_metadata(data: dict) -> None:
     with open(META_FILE, "w") as f:
         yaml.safe_dump(data, f)
-
+    if "days" in data:
+        update_default_days(int(data["days"]))
 
 def guess_mime(filename: str) -> str:
     ext = filename.lower().split(".")[-1]
@@ -66,6 +67,15 @@ def write_cert_metadata(cert_dir: Path, data: dict) -> None:
     with open(cert_dir / "metadata.yaml", "w") as f:
         yaml.safe_dump(data, f)
 
+def update_default_days(days: int) -> None:
+    """Keep OpenSSL default validity in sync with metadata."""
+
+    if not OPENSSL_CNF.exists():
+        return
+
+    content = OPENSSL_CNF.read_text()
+    updated = re.sub(r"(?m)^default_days\s*=\s*\d+", f"default_days    = {days}", content)
+    OPENSSL_CNF.write_text(updated)
 
 def load_cert_metadata(cert_dir: Path) -> dict:
     mf = cert_dir / "metadata.yaml"
@@ -299,7 +309,7 @@ def parse_expiry(meta, crt_path):
         except ValueError:
             return None
     return get_cert_expiry(crt_path) if crt_path.exists() else None
-                                                                         
+
 
 def export_certificate(name: str, fmt: str, password: Optional[str] = None) -> Tuple[Optional[Path], str]:
     base = safe_name(name)
