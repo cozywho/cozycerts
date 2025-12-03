@@ -21,6 +21,7 @@ default_md      = sha256
 preserve        = no
 policy          = policy_anything
 x509_extensions = v3_ca
+crl_days        = 30
 
 # Where new certs go
 RANDFILE        = $dir/.rand
