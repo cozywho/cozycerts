@@ -1,6 +1,6 @@
 # cozycerts
 OpenSSL wrapped in streamlit so dummies like me can use it lazily.  
-A self contained CA intended to work in a venv.
+A self contained CA intended to work in a venv. Dont use this in prod unless its ONLY for cert gen. At least until I come up with a good way to hance CA accessability.
 
 git clone in whatever directory you want cozycerts to live.  
 /opt/cozycerts, /home/$user/cozycerts, /etc/cozycerts, wherever.  
